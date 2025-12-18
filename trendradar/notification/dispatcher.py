@@ -83,8 +83,11 @@ class NotificationDispatcher:
         """
         results = {}
 
-        # 飞书
-        if self.config.get("FEISHU_WEBHOOK_URL"):
+        # 飞书 (支持 Webhook 和 应用机器人)
+        if self.config.get("FEISHU_WEBHOOK_URL") or (
+            self.config.get("FEISHU_APP_ID")
+            and self.config.get("FEISHU_APP_SECRET")
+        ):
             results["feishu"] = self._send_feishu(
                 report_data, report_type, update_info, proxy_url, mode
             )
