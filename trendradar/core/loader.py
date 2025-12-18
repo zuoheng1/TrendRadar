@@ -171,6 +171,10 @@ def _load_webhook_config(config_data: Dict) -> Dict:
     return {
         # 飞书
         "FEISHU_WEBHOOK_URL": _get_env_str("FEISHU_WEBHOOK_URL") or webhooks.get("feishu_url", ""),
+        # 飞书应用机器人（私信更美观）
+        "FEISHU_APP_ID": _get_env_str("FEISHU_APP_ID") or webhooks.get("feishu_app_id", ""),
+        "FEISHU_APP_SECRET": _get_env_str("FEISHU_APP_SECRET") or webhooks.get("feishu_app_secret", ""),
+        "FEISHU_USER_ID": _get_env_str("FEISHU_USER_ID") or webhooks.get("feishu_user_id", ""),
         # 钉钉
         "DINGTALK_WEBHOOK_URL": _get_env_str("DINGTALK_WEBHOOK_URL") or webhooks.get("dingtalk_url", ""),
         # 企业微信
@@ -201,11 +205,34 @@ def _print_notification_sources(config: Dict) -> None:
     notification_sources = []
     max_accounts = config["MAX_ACCOUNTS_PER_CHANNEL"]
 
+    # 调试信息
+    print(f"[DEBUG] FEISHU_APP_ID length: {len(config.get('FEISHU_APP_ID', ''))}")
+    print(f"[DEBUG] FEISHU_APP_SECRET length: {len(config.get('FEISHU_APP_SECRET', ''))}")
+    print(f"[DEBUG] FEISHU_USER_ID length: {len(config.get('FEISHU_USER_ID', ''))}")
+
     if config["FEISHU_WEBHOOK_URL"]:
         accounts = parse_multi_account_config(config["FEISHU_WEBHOOK_URL"])
         count = min(len(accounts), max_accounts)
         source = "环境变量" if os.environ.get("FEISHU_WEBHOOK_URL") else "配置文件"
         notification_sources.append(f"飞书({source}, {count}个账号)")
+
+    # 飞书应用机器人来源信息
+    if config.get("FEISHU_APP_ID") and config.get("FEISHU_APP_SECRET"):
+        app_ids = parse_multi_account_config(config["FEISHU_APP_ID"])
+        app_secrets = parse_multi_account_config(config["FEISHU_APP_SECRET"])
+        user_ids = parse_multi_account_config(config.get("FEISHU_USER_ID", ""))
+        valid, count = validate_paired_configs(
+            {"app_id": app_ids, "app_secret": app_secrets},
+            "飞书(应用机器人)",
+            required_keys=["app_id", "app_secret"]
+        )
+        if valid and count > 0:
+            # 如果提供了多个用户ID，则按最小数量对齐；否则按 app 配置数量
+            if user_ids:
+                count = min(count, len(user_ids))
+            count = min(count, max_accounts)
+            source = "环境变量" if os.environ.get("FEISHU_APP_ID") else "配置文件"
+            notification_sources.append(f"飞书(应用机器人,{source}, {count}个账号)")
 
     if config["DINGTALK_WEBHOOK_URL"]:
         accounts = parse_multi_account_config(config["DINGTALK_WEBHOOK_URL"])
