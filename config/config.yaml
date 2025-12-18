@@ -138,6 +138,10 @@ notification:
   #
   webhooks:
     feishu_url: "" # 飞书机器人的 webhook URL（多账号用 ; 分隔）
+    # 飞书应用机器人配置 (可选，用于发送更美观的私信)
+    feishu_app_id: ""      # 飞书应用 App ID (多账号用 ; 分隔)
+    feishu_app_secret: ""  # 飞书应用 App Secret (多账号用 ; 分隔)
+    feishu_user_id: ""     # 接收者 User ID 或 Email (多账号用 ; 分隔)
     dingtalk_url: "" # 钉钉机器人的 webhook URL（多账号用 ; 分隔）
     wework_url: "" # 企业微信机器人的 webhook URL（多账号用 ; 分隔）
     wework_msg_type: "markdown" # 企业微信消息类型：markdown(群机器人) 或 text(个人微信应用)

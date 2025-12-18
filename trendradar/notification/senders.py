@@ -69,12 +69,19 @@ def send_to_feishu(
     batch_interval: float = 1.0,
     split_content_func: Callable = None,
     get_time_func: Callable = None,
+    # 飞书应用机器人配置
+    app_id: str = None,
+    app_secret: str = None,
+    user_id: str = None,
 ) -> bool:
     """
     发送到飞书（支持分批发送）
+    支持两种模式：
+    1. Webhook 模式：需要 webhook_url
+    2. 应用机器人模式：需要 app_id, app_secret, user_id (或 email)
 
     Args:
-        webhook_url: 飞书 Webhook URL
+        webhook_url: 飞书 Webhook URL (可选)
         report_data: 报告数据
         report_type: 报告类型
         update_info: 更新信息（可选）
@@ -85,17 +92,49 @@ def send_to_feishu(
         batch_interval: 批次发送间隔（秒）
         split_content_func: 内容分批函数
         get_time_func: 获取当前时间的函数
-
+        app_id: 飞书应用 App ID
+        app_secret: 飞书应用 App Secret
+        user_id: 接收者 ID 或 Email
+    
     Returns:
         bool: 发送是否成功
     """
+    if not webhook_url and not (app_id and app_secret and user_id):
+        print("错误：飞书发送需要 Webhook URL 或 (App ID + Secret + User ID)")
+        return False
+
     headers = {"Content-Type": "application/json"}
     proxies = None
     if proxy_url:
         proxies = {"http": proxy_url, "https": proxy_url}
 
+    # 获取 Access Token (仅应用模式)
+    access_token = None
+    if not webhook_url and app_id and app_secret:
+        try:
+            token_url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+            token_res = requests.post(
+                token_url, 
+                json={"app_id": app_id, "app_secret": app_secret},
+                proxies=proxies,
+                timeout=10
+            )
+            if token_res.status_code == 200 and token_res.json().get("code") == 0:
+                access_token = token_res.json().get("tenant_access_token")
+                headers["Authorization"] = f"Bearer {access_token}"
+            else:
+                print(f"获取飞书 Access Token 失败: {token_res.text}")
+                return False
+        except Exception as e:
+            print(f"获取飞书 Access Token 异常: {e}")
+            return False
+
     # 日志前缀
     log_prefix = f"飞书{account_label}" if account_label else "飞书"
+    if access_token:
+        log_prefix += "(应用机器人)"
+    else:
+        log_prefix += "(Webhook)"
 
     # 预留批次头部空间，避免添加头部后超限
     header_reserve = get_max_batch_header_size("feishu")
@@ -172,44 +211,85 @@ def send_to_feishu(
         # 3. 组合 Payload
         # 如果是机器人助手流程 (webhook url 通常包含 flow)，建议使用扁平结构
         # 但为了兼容性，我们构造一个混合包
-        payload = {
-            # 标准群机器人协议
-            "msg_type": "interactive",
-            "card": card_content,
+        
+        if access_token:
+            # 应用机器人模式 (API)
+            # API 地址
+            api_url = "https://open.feishu.cn/open-apis/im/v1/messages"
             
-            # 机器人助手流程兼容字段 (Bot Builder)
-            # 在飞书流程中，你可以配置 Webhook 参数来接收这些字段
-            "text": plain_text_content,     # 完整内容
-            "title": card_title,            # 标题
-            "batch_index": i,               # 批次号
-            "total_batches": len(batches)   # 总批次
-        }
+            # 判断 ID 类型
+            receive_id_type = "open_id"
+            if "@" in user_id:
+                receive_id_type = "email"
+            
+            params = {"receive_id_type": receive_id_type}
+            
+            # API 要求 content 是 JSON 字符串
+            import json
+            content_str = json.dumps(card_content)
+            
+            payload = {
+                "receive_id": user_id,
+                "msg_type": "interactive",
+                "content": content_str
+            }
+            
+            try:
+                response = requests.post(
+                    api_url, 
+                    headers=headers, 
+                    params=params, 
+                    json=payload, 
+                    proxies=proxies, 
+                    timeout=30
+                )
+            except Exception as e:
+                print(f"{log_prefix}第 {i}/{len(batches)} 批次发送出错 [{report_type}]：{e}")
+                return False
 
-        try:
-            response = requests.post(
-                webhook_url, headers=headers, json=payload, proxies=proxies, timeout=30
-            )
-            if response.status_code == 200:
-                result = response.json()
-                # 检查飞书的响应状态
-                if result.get("StatusCode") == 0 or result.get("code") == 0:
-                    print(f"{log_prefix}第 {i}/{len(batches)} 批次发送成功 [{report_type}]")
-                    # 批次间间隔
-                    if i < len(batches):
-                        time.sleep(batch_interval)
-                else:
-                    error_msg = result.get("msg") or result.get("StatusMessage", "未知错误")
-                    print(
-                        f"{log_prefix}第 {i}/{len(batches)} 批次发送失败 [{report_type}]，错误：{error_msg}"
-                    )
-                    return False
+        else:
+            # Webhook 模式
+            payload = {
+                # 标准群机器人协议
+                "msg_type": "interactive",
+                "card": card_content,
+                
+                # 机器人助手流程兼容字段 (Bot Builder)
+                "text": plain_text_content,     # 完整内容
+                "title": card_title,            # 标题
+                "batch_index": i,               # 批次号
+                "total_batches": len(batches)   # 总批次
+            }
+
+            try:
+                response = requests.post(
+                    webhook_url, headers=headers, json=payload, proxies=proxies, timeout=30
+                )
+            except Exception as e:
+                print(f"{log_prefix}第 {i}/{len(batches)} 批次发送出错 [{report_type}]：{e}")
+                return False
+
+        if response.status_code == 200:
+            result = response.json()
+            # 检查飞书的响应状态
+            # Webhook 返回 StatusCode/code, API 返回 code
+            code = result.get("StatusCode") if "StatusCode" in result else result.get("code")
+            
+            if code == 0:
+                print(f"{log_prefix}第 {i}/{len(batches)} 批次发送成功 [{report_type}]")
+                # 批次间间隔
+                if i < len(batches):
+                    time.sleep(batch_interval)
             else:
+                error_msg = result.get("msg") or result.get("StatusMessage", "未知错误")
                 print(
-                    f"{log_prefix}第 {i}/{len(batches)} 批次发送失败 [{report_type}]，状态码：{response.status_code}"
+                    f"{log_prefix}第 {i}/{len(batches)} 批次发送失败 [{report_type}]，错误：{error_msg}"
                 )
                 return False
-        except Exception as e:
-            print(f"{log_prefix}第 {i}/{len(batches)} 批次发送出错 [{report_type}]：{e}")
+        else:
+            print(
+                f"{log_prefix}第 {i}/{len(batches)} 批次发送失败 [{report_type}]，状态码：{response.status_code}，响应：{response.text}"
+            )
             return False
 
     print(f"{log_prefix}所有 {len(batches)} 批次发送完成 [{report_type}]")

@@ -177,24 +177,75 @@ class NotificationDispatcher:
         proxy_url: Optional[str],
         mode: str,
     ) -> bool:
-        """发送到飞书（多账号）"""
-        return self._send_to_multi_accounts(
-            channel_name="飞书",
-            config_value=self.config["FEISHU_WEBHOOK_URL"],
-            send_func=lambda url, account_label: send_to_feishu(
-                webhook_url=url,
-                report_data=report_data,
-                report_type=report_type,
-                update_info=update_info,
-                proxy_url=proxy_url,
-                mode=mode,
-                account_label=account_label,
-                batch_size=self.config.get("FEISHU_BATCH_SIZE", 29000),
-                batch_interval=self.config.get("BATCH_SEND_INTERVAL", 1.0),
-                split_content_func=self.split_content_func,
-                get_time_func=self.get_time_func,
-            ),
-        )
+        """发送到飞书（支持 Webhook 和 应用机器人 多账号）"""
+        results = []
+
+        # 1. Webhook 模式
+        if self.config.get("FEISHU_WEBHOOK_URL"):
+            res = self._send_to_multi_accounts(
+                channel_name="飞书(Webhook)",
+                config_value=self.config["FEISHU_WEBHOOK_URL"],
+                send_func=lambda url, account_label: send_to_feishu(
+                    webhook_url=url,
+                    report_data=report_data,
+                    report_type=report_type,
+                    update_info=update_info,
+                    proxy_url=proxy_url,
+                    mode=mode,
+                    account_label=account_label,
+                    batch_size=self.config.get("FEISHU_BATCH_SIZE", 29000),
+                    batch_interval=self.config.get("BATCH_SEND_INTERVAL", 1.0),
+                    split_content_func=self.split_content_func,
+                    get_time_func=self.get_time_func,
+                ),
+            )
+            results.append(res)
+
+        # 2. 应用机器人模式 (App ID + Secret + User ID)
+        if self.config.get("FEISHU_APP_ID"):
+            app_ids = parse_multi_account_config(self.config["FEISHU_APP_ID"])
+            app_secrets = parse_multi_account_config(self.config["FEISHU_APP_SECRET"])
+            user_ids = parse_multi_account_config(self.config.get("FEISHU_USER_ID", ""))
+
+            if app_ids and app_secrets and user_ids:
+                # 简单验证：确保 ID 和 Secret 数量一致
+                # User ID 可以少于 App ID（复用最后一个），也可以一致
+                # 这里简化处理：要求 App ID, Secret, User ID 数量一致，或 User ID 只有一个
+                
+                valid = True
+                if len(app_ids) != len(app_secrets):
+                    print(f"❌ 飞书应用配置错误：App ID 数量({len(app_ids)})与 Secret 数量({len(app_secrets)})不一致")
+                    valid = False
+                
+                if valid:
+                    # 限制账号数量
+                    app_ids = limit_accounts(app_ids, self.max_accounts, "飞书(App)")
+                    
+                    for i, app_id in enumerate(app_ids):
+                        app_secret = get_account_at_index(app_secrets, i, "")
+                        user_id = get_account_at_index(user_ids, i, user_ids[0] if user_ids else "")
+                        
+                        if app_id and app_secret and user_id:
+                            label = f"App账号{i+1}" if len(app_ids) > 1 else "App"
+                            res = send_to_feishu(
+                                webhook_url=None,
+                                report_data=report_data,
+                                report_type=report_type,
+                                update_info=update_info,
+                                proxy_url=proxy_url,
+                                mode=mode,
+                                account_label=label,
+                                batch_size=self.config.get("FEISHU_BATCH_SIZE", 29000),
+                                batch_interval=self.config.get("BATCH_SEND_INTERVAL", 1.0),
+                                split_content_func=self.split_content_func,
+                                get_time_func=self.get_time_func,
+                                app_id=app_id,
+                                app_secret=app_secret,
+                                user_id=user_id
+                            )
+                            results.append(res)
+
+        return any(results) if results else False
 
     def _send_dingtalk(
         self,
