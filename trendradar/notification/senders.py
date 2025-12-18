@@ -125,43 +125,64 @@ def send_to_feishu(
         now = get_time_func() if get_time_func else datetime.now()
         timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
         
-        # 构造飞书卡片消息
+        # 定义卡片标题
         card_title = f"TrendRadar - {report_type}"
         if len(batches) > 1:
             card_title += f" ({i}/{len(batches)})"
+        
+        # 构造飞书消息
+        # 兼容模式：同时支持群机器人（Interactive/Text）和机器人助手流程（JSON变量提取）
+        
+        # 1. 构建卡片对象（用于群机器人，效果最好）
+        card_content = {
+            "config": {
+                "wide_screen_mode": True
+            },
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": card_title
+                },
+                "template": "blue"
+            },
+            "elements": [
+                {
+                    "tag": "markdown",
+                    "content": batch_content
+                },
+                {
+                    "tag": "hr"
+                },
+                {
+                    "tag": "note",
+                    "elements": [
+                        {
+                            "tag": "plain_text",
+                            "content": f"总新闻数: {total_titles}  |  更新时间: {timestamp_str}"
+                        }
+                    ]
+                }
+            ]
+        }
 
+        # 2. 构建纯文本内容（用于机器人助手流程提取）
+        # 将卡片内容拼接成一个长文本，方便机器人助手直接引用
+        plain_text_content = f"【{card_title}】\n\n{batch_content}\n\n----------------\n总新闻数: {total_titles}\n更新时间: {timestamp_str}"
+
+        # 3. 组合 Payload
+        # 如果是机器人助手流程 (webhook url 通常包含 flow)，建议使用扁平结构
+        # 但为了兼容性，我们构造一个混合包
         payload = {
+            # 标准群机器人协议
             "msg_type": "interactive",
-            "card": {
-                "config": {
-                    "wide_screen_mode": True
-                },
-                "header": {
-                    "title": {
-                        "tag": "plain_text",
-                        "content": card_title
-                    },
-                    "template": "blue"  # 标题背景色: blue, wathet, turquoise, green, yellow, orange, red, carmine, violet, purple, indigo, grey
-                },
-                "elements": [
-                    {
-                        "tag": "markdown",
-                        "content": batch_content
-                    },
-                    {
-                        "tag": "hr"
-                    },
-                    {
-                        "tag": "note",
-                        "elements": [
-                            {
-                                "tag": "plain_text",
-                                "content": f"总新闻数: {total_titles}  |  更新时间: {timestamp_str}"
-                            }
-                        ]
-                    }
-                ]
-            }
+            "card": card_content,
+            
+            # 机器人助手流程兼容字段 (Bot Builder)
+            # 在飞书流程中，你可以配置 Webhook 参数来接收这些字段
+            "text": plain_text_content,     # 完整内容
+            "title": card_title,            # 标题
+            "batch_index": i,               # 批次号
+            "total_batches": len(batches)   # 总批次
         }
 
         try:
