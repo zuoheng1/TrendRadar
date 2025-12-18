@@ -122,12 +122,6 @@ def render_feishu_content(
         for i, id_value in enumerate(report_data["failed_ids"], 1):
             text_content += f"  • **{id_value}**\n"
 
-    # 获取当前时间（注：时间戳移到卡片底部 Note 元素中显示，此处不再添加到文本末尾）
-    # now = get_time_func() if get_time_func else datetime.now()
-    # text_content += (
-    #    f"\n\n<font color='grey'>更新时间：{now.strftime('%Y-%m-%d %H:%M:%S')}</font>"
-    # )
-
     if update_info:
         text_content += f"\n\n**发现新版本 {update_info['remote_version']}** (当前 {update_info['current_version']})"
 
