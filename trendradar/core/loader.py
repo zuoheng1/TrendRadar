@@ -205,11 +205,6 @@ def _print_notification_sources(config: Dict) -> None:
     notification_sources = []
     max_accounts = config["MAX_ACCOUNTS_PER_CHANNEL"]
 
-    # 调试信息
-    print(f"[DEBUG] FEISHU_APP_ID length: {len(config.get('FEISHU_APP_ID', ''))}")
-    print(f"[DEBUG] FEISHU_APP_SECRET length: {len(config.get('FEISHU_APP_SECRET', ''))}")
-    print(f"[DEBUG] FEISHU_USER_ID length: {len(config.get('FEISHU_USER_ID', ''))}")
-
     if config["FEISHU_WEBHOOK_URL"]:
         accounts = parse_multi_account_config(config["FEISHU_WEBHOOK_URL"])
         count = min(len(accounts), max_accounts)
