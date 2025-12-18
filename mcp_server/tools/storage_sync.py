@@ -176,101 +176,36 @@ class StorageSyncTools:
     def sync_from_remote(self, days: int = 7) -> Dict:
         """
         从远程存储拉取数据到本地
+        
+        支持两种模式：
+        1. S3/R2 对象存储：如果配置了 storage.remote，则从对象存储拉取指定天数的数据
+        2. Git 同步：如果未配置 S3 但存在 .git 目录，则执行 git pull 拉取最新数据
 
         Args:
-            days: 拉取最近 N 天的数据，默认 7 天
+            days: 拉取最近 N 天的数据（仅针对 S3 模式生效），默认 7 天
 
         Returns:
             同步结果字典
         """
         try:
-            # 检查远程配置
-            if not self._has_remote_config():
+            # 1. 检查是否配置了远程存储 (S3/R2)
+            if self._has_remote_config():
+                return self._sync_from_s3(days)
+            
+            # 2. 如果未配置 S3，尝试使用 Git Pull
+            elif (self.project_root / ".git").exists():
+                return self._sync_from_git()
+            
+            # 3. 既无 S3 也无 Git
+            else:
                 return {
                     "success": False,
                     "error": {
                         "code": "REMOTE_NOT_CONFIGURED",
                         "message": "未配置远程存储",
-                        "suggestion": "请在 config/config.yaml 中配置 storage.remote 或设置环境变量"
+                        "suggestion": "请在 config/config.yaml 中配置 storage.remote 或确保项目是 Git 仓库"
                     }
                 }
-
-            # 获取远程后端
-            remote_backend = self._get_remote_backend()
-            if remote_backend is None:
-                return {
-                    "success": False,
-                    "error": {
-                        "code": "REMOTE_BACKEND_FAILED",
-                        "message": "无法创建远程存储后端",
-                        "suggestion": "请检查远程存储配置和 boto3 是否已安装"
-                    }
-                }
-
-            # 获取本地数据目录
-            local_dir = self._get_local_data_dir()
-            local_dir.mkdir(parents=True, exist_ok=True)
-
-            # 获取远程可用日期
-            remote_dates = remote_backend.list_remote_dates()
-
-            # 获取本地已有日期
-            local_dates = set(self._get_local_dates())
-
-            # 计算需要拉取的日期（最近 N 天）
-            from trendradar.utils.time import get_configured_time
-            config = self._load_config()
-            timezone = config.get("app", {}).get("timezone", "Asia/Shanghai")
-            now = get_configured_time(timezone)
-
-            target_dates = []
-            for i in range(days):
-                date = now - timedelta(days=i)
-                date_str = date.strftime("%Y-%m-%d")
-                if date_str in remote_dates:
-                    target_dates.append(date_str)
-
-            # 执行拉取
-            synced_dates = []
-            skipped_dates = []
-            failed_dates = []
-
-            for date_str in target_dates:
-                # 检查本地是否已存在
-                if date_str in local_dates:
-                    skipped_dates.append(date_str)
-                    continue
-
-                # 拉取单个日期
-                try:
-                    local_date_dir = local_dir / date_str
-                    local_db_path = local_date_dir / "news.db"
-                    remote_key = f"news/{date_str}.db"
-
-                    local_date_dir.mkdir(parents=True, exist_ok=True)
-                    remote_backend.s3_client.download_file(
-                        remote_backend.bucket_name,
-                        remote_key,
-                        str(local_db_path)
-                    )
-                    synced_dates.append(date_str)
-                    print(f"[存储同步] 已拉取: {date_str}")
-                except Exception as e:
-                    failed_dates.append({"date": date_str, "error": str(e)})
-                    print(f"[存储同步] 拉取失败 ({date_str}): {e}")
-
-            return {
-                "success": True,
-                "synced_files": len(synced_dates),
-                "synced_dates": synced_dates,
-                "skipped_dates": skipped_dates,
-                "failed_dates": failed_dates,
-                "message": f"成功同步 {len(synced_dates)} 天数据" + (
-                    f"，跳过 {len(skipped_dates)} 天（本地已存在）" if skipped_dates else ""
-                ) + (
-                    f"，失败 {len(failed_dates)} 天" if failed_dates else ""
-                )
-            }
 
         except MCPError as e:
             return {
@@ -285,6 +220,131 @@ class StorageSyncTools:
                     "message": str(e)
                 }
             }
+
+    def _sync_from_git(self) -> Dict:
+        """执行 Git Pull 同步"""
+        try:
+            import subprocess
+            print("[存储同步] 正在执行 git pull...")
+            
+            # 执行 git pull
+            result = subprocess.run(
+                ["git", "pull"],
+                cwd=self.project_root,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            return {
+                "success": True,
+                "mode": "git",
+                "message": "Git Pull 成功，已同步最新数据",
+                "details": result.stdout.strip(),
+                # Git 模式下不统计具体日期
+                "synced_files": 0,
+                "synced_dates": [],
+                "skipped_dates": [],
+                "failed_dates": []
+            }
+        except subprocess.CalledProcessError as e:
+            error_msg = e.stderr.strip() or str(e)
+            return {
+                "success": False,
+                "error": {
+                    "code": "GIT_PULL_FAILED",
+                    "message": f"Git Pull 失败: {error_msg}",
+                    "suggestion": "请检查网络连接或尝试手动运行 git pull"
+                }
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": {
+                    "code": "GIT_SYNC_ERROR",
+                    "message": f"Git 同步出错: {str(e)}"
+                }
+            }
+
+    def _sync_from_s3(self, days: int) -> Dict:
+        """执行 S3 拉取同步"""
+        # 获取远程后端
+        remote_backend = self._get_remote_backend()
+        if remote_backend is None:
+            return {
+                "success": False,
+                "error": {
+                    "code": "REMOTE_BACKEND_FAILED",
+                    "message": "无法创建远程存储后端",
+                    "suggestion": "请检查远程存储配置和 boto3 是否已安装"
+                }
+            }
+
+        # 获取本地数据目录
+        local_dir = self._get_local_data_dir()
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        # 获取远程可用日期
+        remote_dates = remote_backend.list_remote_dates()
+
+        # 获取本地已有日期
+        local_dates = set(self._get_local_dates())
+
+        # 计算需要拉取的日期（最近 N 天）
+        from trendradar.utils.time import get_configured_time
+        config = self._load_config()
+        timezone = config.get("app", {}).get("timezone", "Asia/Shanghai")
+        now = get_configured_time(timezone)
+
+        target_dates = []
+        for i in range(days):
+            date = now - timedelta(days=i)
+            date_str = date.strftime("%Y-%m-%d")
+            if date_str in remote_dates:
+                target_dates.append(date_str)
+
+        # 执行拉取
+        synced_dates = []
+        skipped_dates = []
+        failed_dates = []
+
+        for date_str in target_dates:
+            # 检查本地是否已存在
+            if date_str in local_dates:
+                skipped_dates.append(date_str)
+                continue
+
+            # 拉取单个日期
+            try:
+                local_date_dir = local_dir / date_str
+                local_db_path = local_date_dir / "news.db"
+                remote_key = f"news/{date_str}.db"
+
+                local_date_dir.mkdir(parents=True, exist_ok=True)
+                remote_backend.s3_client.download_file(
+                    remote_backend.bucket_name,
+                    remote_key,
+                    str(local_db_path)
+                )
+                synced_dates.append(date_str)
+                print(f"[存储同步] 已拉取: {date_str}")
+            except Exception as e:
+                failed_dates.append({"date": date_str, "error": str(e)})
+                print(f"[存储同步] 拉取失败 ({date_str}): {e}")
+
+        return {
+            "success": True,
+            "mode": "s3",
+            "synced_files": len(synced_dates),
+            "synced_dates": synced_dates,
+            "skipped_dates": skipped_dates,
+            "failed_dates": failed_dates,
+            "message": f"成功同步 {len(synced_dates)} 天数据" + (
+                f"，跳过 {len(skipped_dates)} 天（本地已存在）" if skipped_dates else ""
+            ) + (
+                f"，失败 {len(failed_dates)} 天" if failed_dates else ""
+            )
+        }
 
     def get_storage_status(self) -> Dict:
         """

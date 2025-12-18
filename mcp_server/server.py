@@ -668,34 +668,18 @@ async def sync_from_remote(
     """
     从远程存储拉取数据到本地
 
-    用于 MCP Server 等场景：爬虫存到远程云存储（如 Cloudflare R2），
-    MCP Server 拉取到本地进行分析查询。
+    支持两种模式：
+    1. S3/R2 对象存储：如果配置了 storage.remote，则从对象存储拉取指定天数的数据
+    2. Git 同步：如果未配置 S3 但存在 .git 目录，则执行 git pull 拉取最新数据（推荐）
 
     Args:
-        days: 拉取最近 N 天的数据，默认 7 天
+        days: 拉取最近 N 天的数据（仅针对 S3 模式生效），默认 7 天
               - 0: 不拉取
               - 7: 拉取最近一周的数据
               - 30: 拉取最近一个月的数据
 
     Returns:
-        JSON格式的同步结果，包含：
-        - success: 是否成功
-        - synced_files: 成功同步的文件数量
-        - synced_dates: 成功同步的日期列表
-        - skipped_dates: 跳过的日期（本地已存在）
-        - failed_dates: 失败的日期及错误信息
-        - message: 操作结果描述
-
-    Examples:
-        - sync_from_remote()  # 拉取最近7天
-        - sync_from_remote(days=30)  # 拉取最近30天
-
-    Note:
-        需要在 config/config.yaml 中配置远程存储（storage.remote）或设置环境变量：
-        - S3_ENDPOINT_URL: 服务端点
-        - S3_BUCKET_NAME: 存储桶名称
-        - S3_ACCESS_KEY_ID: 访问密钥 ID
-        - S3_SECRET_ACCESS_KEY: 访问密钥
+        JSON格式的同步结果
     """
     tools = _get_tools()
     result = tools['storage'].sync_from_remote(days=days)
