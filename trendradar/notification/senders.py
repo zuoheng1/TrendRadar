@@ -123,15 +123,45 @@ def send_to_feishu(
             len(stat["titles"]) for stat in report_data["stats"] if stat["count"] > 0
         )
         now = get_time_func() if get_time_func else datetime.now()
+        timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 构造飞书卡片消息
+        card_title = f"TrendRadar - {report_type}"
+        if len(batches) > 1:
+            card_title += f" ({i}/{len(batches)})"
 
         payload = {
-            "msg_type": "text",
-            "content": {
-                "total_titles": total_titles,
-                "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
-                "report_type": report_type,
-                "text": batch_content,
-            },
+            "msg_type": "interactive",
+            "card": {
+                "config": {
+                    "wide_screen_mode": True
+                },
+                "header": {
+                    "title": {
+                        "tag": "plain_text",
+                        "content": card_title
+                    },
+                    "template": "blue"  # 标题背景色: blue, wathet, turquoise, green, yellow, orange, red, carmine, violet, purple, indigo, grey
+                },
+                "elements": [
+                    {
+                        "tag": "markdown",
+                        "content": batch_content
+                    },
+                    {
+                        "tag": "hr"
+                    },
+                    {
+                        "tag": "note",
+                        "elements": [
+                            {
+                                "tag": "plain_text",
+                                "content": f"总新闻数: {total_titles}  |  更新时间: {timestamp_str}"
+                            }
+                        ]
+                    }
+                ]
+            }
         }
 
         try:
