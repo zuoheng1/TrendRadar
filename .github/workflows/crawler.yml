@@ -1,6 +1,10 @@
 name: Get Hot News
 
+# Triggered by push to force detection
 on:
+  push:
+    paths:
+      - '.github/workflows/crawler.yml'
   schedule:
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # ⚠️ 试用版说明 / Trial Mode
