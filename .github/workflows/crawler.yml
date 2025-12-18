@@ -161,3 +161,21 @@ jobs:
           S3_REGION: ${{ secrets.S3_REGION }}
           GITHUB_ACTIONS: true
         run: python -m trendradar
+
+      - name: Commit and Push changes
+        if: success()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          # 确保 output 目录存在
+          if [ -d "output" ]; then
+            git add output/
+            if git diff --staged --quiet; then
+              echo "No changes to commit"
+            else
+              git commit -m "Update crawler data [skip ci]"
+              git push
+            fi
+          else
+            echo "Output directory not found, skipping commit"
+          fi
